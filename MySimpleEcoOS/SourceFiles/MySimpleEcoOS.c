@@ -62,7 +62,7 @@ uint8_t g_taskSteps = 0;
 
 /* Глобальная позиция для журнала старта задач */
 uint16_t g_logRow = 2;
-
+int i,j;
 /* Длительность задач (в условных единицах из TimeIn) */
 uint16_t g_taskDuration1 = 0;
 uint16_t g_taskDuration2 = 0;
@@ -71,40 +71,106 @@ uint16_t g_taskDuration4 = 0;
 
 /* Локальная утилита: преобразование числа в строку, чтобы не тянуть Eco.String1 */
 static void u32_to_str(uint32_t v, char* buf, int bufsize) {
-    int i = bufsize - 1;
-    buf[i] = '\0';
     if (bufsize < 2) {
         return;
     }
+    
+    /* Инициализация буфера нулями */
+    int k;
+    for (k = 0; k < bufsize; k++) {
+        buf[k] = '\0';
+    }
+    
     if (v == 0) {
-        buf[--i] = '0';
-    } else {
-        while (i > 0 && v > 0) {
-            buf[--i] = (char)('0' + (v % 10));
-            v /= 10;
-        }
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
     }
-    /* сдвиг к началу */
-    int j = 0;
-    while (i < bufsize && buf[i] != '\0') {
-        buf[j++] = buf[i++];
+    
+    /* Сохраняем цифры в обратном порядке в временный массив */
+    char temp[16];
+    int tempIdx = 0;
+    uint32_t val = v;
+    
+    /* Извлекаем цифры справа налево */
+    while (val > 0 && tempIdx < 15) {
+        temp[tempIdx] = (char)('0' + (val % 10));
+        tempIdx++;
+        val = val / 10;
     }
-    buf[j] = '\0';
+    
+    /* Копируем цифры в правильном порядке (слева направо) */
+    int i = 0;
+    while (tempIdx > 0 && i < bufsize - 1) {
+        tempIdx--;
+        buf[i] = temp[tempIdx];
+        i++;
+    }
+    buf[i] = '\0';
 }
 
-/* Печать строки журнала «Пришла задача #N» в следующей строке экрана */
-static void LogTaskStart(char_t* text) {
+/* Печать строки журнала «Пришла задача #N (Время входа: T)» в следующей строке экрана */
+static void LogTaskStart(char_t* text, uint16_t timeIn) {
     if (g_pIVideo == 0) {
         return;
     }
+    char_t fullText[64] = {0};
+    char_t numBuf[16] = {0};
+    int pos = 0;
+    int k;
+    
+    /* Копируем базовый текст */
+    for (k = 0; text[k] != '\0' && k < 32 && pos < 60; k++, pos++) {
+        fullText[pos] = text[k];
+    }
+    /* Добавляем информацию о времени входа */
+    fullText[pos++] = ' '; fullText[pos++] = '(';
+    /* "Время входа: " */
+    fullText[pos++] = '\xc2'; fullText[pos++] = '\xf0'; fullText[pos++] = '\xe5';
+    fullText[pos++] = '\xec'; fullText[pos++] = '\xff'; fullText[pos++] = ' ';
+    fullText[pos++] = '\xe2'; fullText[pos++] = '\xf5'; fullText[pos++] = '\xee';
+    fullText[pos++] = '\xe4'; fullText[pos++] = '\xe0'; fullText[pos++] = ':';
+    fullText[pos++] = ' ';
+    /* Значение времени входа - преобразуем число в строку */
+    /* Сначала очищаем буфер */
+    for (k = 0; k < sizeof(numBuf); k++) {
+        numBuf[k] = '\0';
+    }
+    u32_to_str((uint32_t)timeIn, numBuf, sizeof(numBuf));
+    /* Копируем число в полный текст */
+    k = 0;
+    while (numBuf[k] != '\0' && k < sizeof(numBuf) && pos < 60) {
+        fullText[pos++] = numBuf[k++];
+    }
+    /* Если число не было преобразовано (пустая строка), добавляем значение напрямую */
+    if (k == 0) {
+        /* Простое преобразование для отладки */
+        if (timeIn == 0) {
+            fullText[pos++] = '0';
+        } else {
+            uint16_t val = timeIn;
+            char digits[5];
+            int digitCount = 0;
+            while (val > 0 && digitCount < 4) {
+                digits[digitCount++] = (char)('0' + (val % 10));
+                val /= 10;
+            }
+            while (digitCount > 0 && pos < 60) {
+                fullText[pos++] = digits[--digitCount];
+            }
+        }
+    }
+    fullText[pos++] = ')';
+    fullText[pos] = '\0';
+    
     g_pIVideo->pVTbl->WriteString(g_pIVideo,
                                   0,
                                   0,
                                   0,
                                   g_logRow,
                                   CHARACTER_ATTRIBUTE_FORE_COLOR_CYAN,
-                                  text,
-                                  16);
+                                  fullText,
+                                  pos);
     g_logRow++;
 }
 
@@ -159,7 +225,7 @@ void Task1() {
     uint64_t factor = 1ull + (uint64_t)g_taskDuration1 / 10ull;
     uint64_t step = baseStep * factor;
     uint64_t changeTime = currentTime + step;
-    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x31"); /* «Пришла задача #1» */
+    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x31", g_taskDuration1); /* «Пришла задача #1» */
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 0, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "1", 1);
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 4, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "\x7c\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x7c\x20\x20\x30\x20\x25", 17);
 	g_taskSteps = 0;
@@ -180,7 +246,7 @@ void Task2() {
     uint64_t step = baseStep * factor;
     uint64_t changeTime = currentTime + step;
 	g_taskSteps = 0;
-    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x32"); /* «Пришла задача #2» */
+    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x32", g_taskDuration2); /* «Пришла задача #2» */
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 0, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "2", 1);
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 4, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "\x7c\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x7c\x20\x20\x30\x20\x25", 17);
     while (g_taskSteps < 100) {
@@ -200,7 +266,7 @@ void Task3() {
     uint64_t step = baseStep * factor;
     uint64_t changeTime = currentTime + step;
 	g_taskSteps = 0;
-    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x33"); /* «Пришла задача #3» */
+    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x33", g_taskDuration3); /* «Пришла задача #3» */
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 0, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "3", 1);
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 4, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "\x7c\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x7c\x20\x20\x30\x20\x25", 17);
     while (g_taskSteps < 100) {
@@ -220,7 +286,7 @@ void Task4() {
     uint64_t step = baseStep * factor;
     uint64_t changeTime = currentTime + step;
 	g_taskSteps = 0;
-    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x34"); /* «Пришла задача #4» */
+    LogTaskStart("\xcf\xf0\xe8\xf8\xeb\xe0\x20\xe7\xe0\xe4\xe0\xf7\xe0\x20\x23\x34", g_taskDuration4); /* «Пришла задача #4» */
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 0, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "4", 1);
     g_pIVideo->pVTbl->WriteString(g_pIVideo, 0, 0, 4, 1, CHARACTER_ATTRIBUTE_FORE_COLOR_WHITTE, "\x7c\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x2e\x7c\x20\x20\x30\x20\x25", 17);
     while (g_taskSteps < 100) {
@@ -399,9 +465,9 @@ int16_t EcoMain(IEcoUnknown* pIUnk) {
 
 	/* Инициализация времени входа для алгоритма планирования в порядке FIFO (FCFS)  */
     pITask1->pVTbl->SetTimeIn(pITask1, 20);
-    pITask1->pVTbl->SetTimeIn(pITask2, 5);
-    pITask1->pVTbl->SetTimeIn(pITask3, 10);
-    pITask1->pVTbl->SetTimeIn(pITask4, 7);
+    pITask2->pVTbl->SetTimeIn(pITask2, 5);
+    pITask3->pVTbl->SetTimeIn(pITask3, 10);
+    pITask4->pVTbl->SetTimeIn(pITask4, 7);
 
     /* Связываем длительность задач с их временем входа */
     g_taskDuration1 = pITask1->pVTbl->GetTimeIn(pITask1);
@@ -460,8 +526,6 @@ int16_t EcoMain(IEcoUnknown* pIUnk) {
     g_pIVFB = pIVFB;
     g_pIVideo = pIVideo;
     pIScheduler->pVTbl->Start(pIScheduler);
-
-	pIScheduler->pVTbl->NewTask(pIScheduler, Task4, 0, 0x100, &pITask4);
 
     while(1) {
         asm volatile ("NOP\n\t" ::: "memory");
